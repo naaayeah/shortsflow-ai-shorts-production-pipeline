@@ -1,0 +1,5 @@
+{
+  "name": "ShortsFlow: AI Shorts Production Pipeline",
+  "description": "Convert community posts into full YouTube Shorts production packages including scripts, scene prompts, and SRT subtitles.",
+  "requestFramePermissions": []
+}
