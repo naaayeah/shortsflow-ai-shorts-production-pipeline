@@ -71,7 +71,7 @@ export default function ShortsPipeline() {
       // STEP 1: Script Generation
       setStep(1);
       const scriptResponse = await ai.models.generateContent({
-        model: "gemini-1.5-flash-latest",
+        model: "gemini-2.0-flash",
         contents: `Convert the following SOURCE CONTENT into a YouTube Shorts storytelling script.
         
         SOURCE CONTENT:
@@ -129,7 +129,7 @@ export default function ShortsPipeline() {
       // STEP 2: Scene Generation
       setStep(2);
       const scenesResponse = await ai.models.generateContent({
-        model: "gemini-1.5-flash-latest",
+        model: "gemini-2.0-flash",
         contents: `1️⃣ Split the following script into 5-8 scenes based on story flow (each scene 3-5s).
         2️⃣ Generate a concise, word-focused image prompt for each scene in English.
         
@@ -191,7 +191,7 @@ export default function ShortsPipeline() {
       
       // We'll ask Gemini to generate the SRT based on the rules
       const srtResponse = await ai.models.generateContent({
-        model: "gemini-1.5-flash-latest",
+        model: "gemini-2.0-flash",
         contents: `Generate an SRT subtitle file from the following script.
         
         SCRIPT:
