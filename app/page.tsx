@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
-import { 
+import {
   Play, 
   FileText, 
   Image as ImageIcon, 
@@ -18,10 +17,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useEffect, useRef } from 'react';
-
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+import { useEffect } from 'react';
 
 interface Scene {
   sceneNumber: number;
@@ -35,6 +31,36 @@ interface PipelineResult {
   srt: string;
   srtFileName: string;
 }
+
+interface GenerateApiResponse {
+  text: string;
+}
+
+const normalizeApiErrorMessage = (errorData: unknown, fallback: string) => {
+  const geminiQuotaHint =
+    'Gemini quota error detected. This app should use OpenAI now. Please redeploy latest code, clear browser cache, and set OPENAI_API_KEY on the server.';
+
+  if (typeof errorData === 'string') {
+    return errorData.includes('generativelanguage.googleapis.com') ? geminiQuotaHint : errorData;
+  }
+
+  if (!errorData || typeof errorData !== 'object') return fallback;
+
+  const maybeError = (errorData as { error?: unknown }).error;
+
+  if (typeof maybeError === 'string') {
+    return maybeError.includes('generativelanguage.googleapis.com') ? geminiQuotaHint : maybeError;
+  }
+
+  if (maybeError && typeof maybeError === 'object') {
+    const message = (maybeError as { message?: unknown }).message;
+    if (typeof message === 'string') {
+      return message.includes('generativelanguage.googleapis.com') ? geminiQuotaHint : message;
+    }
+  }
+
+  return fallback;
+};
 
 export default function ShortsPipeline() {
   const [input, setInput] = useState('');
@@ -58,6 +84,29 @@ export default function ShortsPipeline() {
     }
   }, [focusIndex, scriptLines]);
 
+  const generateWithServer = async (task: 'script' | 'scenes' | 'srt', prompt: string) => {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, prompt }),
+    });
+
+    if (!response.ok) {
+      let message = 'Request failed.';
+      try {
+        const errorData = await response.json();
+        message = normalizeApiErrorMessage(errorData, message);
+      } catch {
+        // Ignore JSON parse errors for non-JSON error responses
+      }
+      throw new Error(message);
+    }
+
+    const data: GenerateApiResponse = await response.json();
+    if (!data.text) throw new Error('Empty response from AI service.');
+    return data.text;
+  };
+
   const generateScript = async () => {
     if (!input.trim()) return;
 
@@ -70,9 +119,9 @@ export default function ShortsPipeline() {
     try {
       // STEP 1: Script Generation
       setStep(1);
-      const scriptResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Convert the following SOURCE CONTENT into a YouTube Shorts storytelling script.
+      const scriptText = await generateWithServer(
+        'script',
+        `Convert the following SOURCE CONTENT into a YouTube Shorts storytelling script.
         
         SOURCE CONTENT:
         ${input}
@@ -101,9 +150,7 @@ export default function ShortsPipeline() {
         5 Ending + question 
 
         Return ONLY the script lines, one per line.`,
-      });
-
-      const scriptText = scriptResponse.text;
+      );
       if (!scriptText) throw new Error("Failed to generate script.");
       const lines = scriptText.split('\n').filter(line => line.trim() !== '');
       setScriptLines(lines);
@@ -128,9 +175,9 @@ export default function ShortsPipeline() {
 
       // STEP 2: Scene Generation
       setStep(2);
-      const scenesResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `1️⃣ Split the following script into 5-8 scenes based on story flow (each scene 3-5s).
+      const scenesText = await generateWithServer(
+        'scenes',
+        `1️⃣ Split the following script into 5-8 scenes based on story flow (each scene 3-5s).
         2️⃣ Generate a concise, word-focused image prompt for each scene in English.
         
         SCRIPT:
@@ -164,24 +211,7 @@ export default function ShortsPipeline() {
         - script (string, the part of the script for this scene)
         - imagePrompt (string)
         `,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                sceneNumber: { type: Type.NUMBER },
-                script: { type: Type.STRING },
-                imagePrompt: { type: Type.STRING },
-              },
-              required: ["sceneNumber", "script", "imagePrompt"]
-            }
-          }
-        }
-      });
-
-      const scenesText = scenesResponse.text;
+      );
       if (!scenesText) throw new Error("Failed to generate scenes.");
       const scenes: Scene[] = JSON.parse(scenesText);
 
@@ -189,10 +219,9 @@ export default function ShortsPipeline() {
       setStep(3);
       const today = new Date().toISOString().split('T')[0];
       
-      // We'll ask Gemini to generate the SRT based on the rules
-      const srtResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Generate an SRT subtitle file from the following script.
+      const srtText = await generateWithServer(
+        'srt',
+        `Generate an SRT subtitle file from the following script.
         
         SCRIPT:
         ${scriptLines.join('\n')}
@@ -211,9 +240,7 @@ export default function ShortsPipeline() {
         - Last question: 1.7–2.3 sec
 
         Return ONLY the SRT content.`,
-      });
-
-      const srtText = srtResponse.text;
+      );
       if (!srtText) throw new Error("Failed to generate SRT.");
 
       // Generate filename
